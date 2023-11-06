@@ -11,18 +11,8 @@
 
 using namespace std;
 
-/* priority_queue <Transaction*, vector<Transaction*>, Comparator> gq; //track transactions
+uint64_t convertTimestamp(string line);
 
-struct Transaction{
-    public:
-        int32_t timestamp;
-        string ip;
-        User sender;
-        User recipient;
-        int amount;
-        int32_t exec;
-        bool o; //true -> o, false -> s
-}; */
 
 struct User{
     public:
@@ -31,19 +21,47 @@ struct User{
         int pin;
         int balance;
         vector<string> ip;
-};
+        
+        User() : timestamp(0), id(""), pin(0), balance(0), ip() {
+        }
 
+        // Constructor with integer timestamp
+        User(int64_t ts, string idi, int pini, int balancei)
+            : timestamp(ts), id(idi), pin(pini), balance(balancei), ip() {
+        }
+
+        // Constructor with string timestamp
+        User(string ts, string idi, int pini, int balancei)
+            : timestamp(convertTimestamp(ts)), id(idi), pin(pini), balance(balancei), ip() {
+        }
+};
 unordered_map<string, User> usermap;
 
+struct Transaction{
+    public:
+        int64_t timestamp;
+        string ip;
+        User sender;
+        User recipient;
+        int amount;
+        int64_t exec;
+        bool o; //true -> o, false -> s
 
-/* struct Comparator{
-    bool operator()(const Transaction* t1, const Transaction* t2) const{
-        if(t1->timestamp > t2->timestamp){
-            return t2;
-        }
-        return t1;
+        Transaction(int64_t ts, string ipAddress, User sndr, User rcpt, int amnt, int64_t e, bool isO)
+        : timestamp(ts), ip(ipAddress), sender(sndr), recipient(rcpt), amount(amnt), exec(e), o(isO) {
     }
-}; */
+};
+struct Comparator{
+    bool operator()(Transaction t1, Transaction t2) const{
+        if(t1.exec > t2.exec){
+            return true;
+        }
+        return false;
+    }
+};
+priority_queue <Transaction, vector<Transaction>, Comparator> transpq; //track transactions
+
+
 
 bool f, v = false;
 string filename;
@@ -79,7 +97,7 @@ void cl(int argc, char** argv){
 }
 
 uint64_t convertTimestamp(string line){
-    std::string cleanedInput;
+    string cleanedInput;
     for (char c : line) {
         if (c != ':') {
             cleanedInput += c;
@@ -101,17 +119,53 @@ void regfill(){
             getline(iss, id, '|') &&
             getline(iss, pinPart, '|') &&
             getline(iss, balancePart, '|')) {
-            User temp;
-            temp.timestamp = convertTimestamp(timestampPart); // Convert the timestamp part
-            temp.id = id;
-            temp.pin = stoi(pinPart);
-            temp.balance = stoi(balancePart);
+            User temp(timestampPart, id, stoi(pinPart), stoi(balancePart));
+            
             usermap[temp.id] = temp;
         }
     }
 }
 
+bool validTransaction(Transaction){
+    
+}
+
 void transactionfill(){
+    string line;
+    //user ip must be updated
+    while(getline(cin, line)){
+        if(cin.peek() == '#'){
+            while(cin.peek() != '\n'){
+                cin >> line;
+            }
+            continue;
+        }
+        cin >> line;
+        if(line == "login"){
+            string id;
+            string pin;
+            string ip;
+            cin >> id >> pin >> ip;
+            cout << "login: " << id << endl;
+            cout << "pin: " << pin << endl;
+            cout << "ip: " << ip << endl;
+
+        }
+        else if(line == "place"){
+            string timestamp;
+            string ip;
+            string sender;
+            string recipient;
+            string amount;
+            string exec;
+            string os;
+            cin >> timestamp >> ip >> sender >> recipient >> amount >> exec >> os;
+            cout << "Transaction: " << ip << sender << recipient << endl;
+            bool isO = (os=="o");
+            Transaction temp(convertTimestamp(timestamp), ip, usermap[sender], usermap[recipient], stoi(amount), convertTimestamp(exec), isO);
+            transpq.push(temp);
+        }
+    }
 }
 
 int main(int argc, char **argv){
