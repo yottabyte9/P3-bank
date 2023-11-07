@@ -20,7 +20,7 @@ struct User{
         string id;
         int pin;
         int balance;
-        vector<string> ip;
+        vector<uint64_t> ip;
         
         User() : timestamp(0), id(""), pin(0), balance(0), ip() {
         }
@@ -40,15 +40,33 @@ unordered_map<string, User> usermap;
 struct Transaction{
     public:
         int64_t timestamp;
-        string ip;
-        User sender;
-        User recipient;
+        uint64_t ip;
+        User& sender;
+        User& recipient;
         int amount;
         int64_t exec;
         bool o; //true -> o, false -> s
+        int fee;
 
-        Transaction(int64_t ts, string ipAddress, User sndr, User rcpt, int amnt, int64_t e, bool isO)
-        : timestamp(ts), ip(ipAddress), sender(sndr), recipient(rcpt), amount(amnt), exec(e), o(isO) {
+        Transaction(int64_t ts, uint64_t ipAddress, User& sndr, User& rcpt, int amnt, int64_t e, bool isO)
+        : timestamp(ts), ip(ipAddress), sender(sndr), recipient(rcpt), amount(amnt), exec(e), o(isO), fee() {
+        }
+        Transaction(int64_t ts, uint64_t ipAddress, string sndrid, string rcptid, int amnt, int64_t e, bool isO)
+        : timestamp(ts), ip(ipAddress), sender(usermap[sndrid]), recipient(usermap[rcptid]), amount(amnt), exec(e), o(isO), fee() {
+        }
+
+        Transaction& operator=(Transaction& other) {
+        if (this != &other) {
+            timestamp = other.timestamp;
+            ip = other.ip;
+            sender = other.sender;
+            recipient = other.recipient;
+            amount = other.amount;
+            exec = other.exec;
+            o = other.o;
+            fee = other.fee;
+        }
+        return *this;
     }
 };
 struct Comparator{
@@ -96,10 +114,10 @@ void cl(int argc, char** argv){
     }
 }
 
-uint64_t convertTimestamp(string line){
+uint64_t convertTimestamp(string line){ //converts ips as well
     string cleanedInput;
     for (char c : line) {
-        if (c != ':') {
+        if (c != ':' && c != '.') {
             cleanedInput += c;
         }
     }
@@ -126,11 +144,70 @@ void regfill(){
     }
 }
 
-bool validTransaction(Transaction){
-    
+bool validLogin(string id, int pin){ //make IP into number
+    auto it = usermap.find(id);
+    if(it==usermap.end()){
+        return false; //no user there
+    }
+    else if(usermap[id].pin != pin){
+        return false; //wrong pin
+    } //already logged in???
+    return true;
+}
+
+bool validTransaction(int64_t ts, uint64_t ipAddress, string sndrid, string rcptid, int64_t e){
+    //cout << e << " checking validity \n";
+    if(ts + 3000000 < e){
+        //cout << "wrong date \n";
+        return false;
+    }
+    if(usermap.find(rcptid) == usermap.end()){ //recipient does not exist
+        //cout << "no reciever\n";
+        return false;
+    }
+    if(usermap.find(sndrid) == usermap.end()){ //sender does not exist
+        //cout << "no sender\n";
+        return false;
+    }
+    User& sndr = usermap[sndrid];
+    User& rcpt = usermap[rcptid];
+    auto it = find(sndr.ip.begin(), sndr.ip.end(), ipAddress);
+    if(it == sndr.ip.end()){
+        //cout << "no ip\n";
+        return false;
+    }
+    if(usermap[sndr.id].timestamp > ts || usermap[rcpt.id].timestamp > ts){
+        //cout << "someone not registered yet\n";
+        return false;
+    }
+    //cout << "passed validity \n";
+    return true;
+}
+
+bool checkamt(Transaction place){
+    int fee = (int)(place.amount *0.01);
+    if(fee < 10){
+        fee = 10;
+    }
+    if(fee > 450){
+        fee = 450;
+    }
+    //place.amount += (int)fee;
+    if(place.o){ //sender cover
+        if(place.sender.balance < place.amount + fee) return false;
+    }
+    else if(!place.o){
+        if(place.sender.balance < place.amount) return false;
+        if(place.recipient.balance + place.amount < fee) return false;
+    }
+    place.fee = fee;
+    cout << place.sender.balance << "\n";
+    return true;
+
 }
 
 void transactionfill(){
+    //cout << "begin transaction fill \n";
     string line;
     //user ip must be updated
     while(getline(cin, line)){
@@ -142,14 +219,14 @@ void transactionfill(){
         }
         cin >> line;
         if(line == "login"){
+            //cout << "started login\n";
             string id;
             string pin;
             string ip;
             cin >> id >> pin >> ip;
-            cout << "login: " << id << endl;
-            cout << "pin: " << pin << endl;
-            cout << "ip: " << ip << endl;
-
+            if(validLogin(id, stoi(pin))){
+                usermap[id].ip.push_back(convertTimestamp(ip));
+            }
         }
         else if(line == "place"){
             string timestamp;
@@ -160,11 +237,37 @@ void transactionfill(){
             string exec;
             string os;
             cin >> timestamp >> ip >> sender >> recipient >> amount >> exec >> os;
-            cout << "Transaction: " << ip << sender << recipient << endl;
+            //cout << "Transaction: " << ip << sender << recipient << "  ";
             bool isO = (os=="o");
-            Transaction temp(convertTimestamp(timestamp), ip, usermap[sender], usermap[recipient], stoi(amount), convertTimestamp(exec), isO);
-            transpq.push(temp);
+            uint64_t convertedIP = convertTimestamp(ip);
+            if(validTransaction(convertTimestamp(timestamp), convertedIP, sender, recipient, convertTimestamp(exec))){
+                Transaction temp(convertTimestamp(timestamp), convertedIP, sender, recipient, stoi(amount), convertTimestamp(exec), isO);
+                transpq.push(temp);
+            }
+            //cout << "Transaction done \n";
         }
+    }
+}
+
+vector<Transaction> transdone;
+
+void place(){
+    //cout << transpq.size();
+    while(!transpq.empty()){
+        Transaction temp = transpq.top();
+        if(checkamt(transpq.top())){
+            cout << temp.sender.id << ", " << temp.recipient.id << ", " << temp.amount << endl;
+            /* if(temp.o){ //seller covers fee
+                temp.sender.balance -= temp.fee;
+            }
+            else{
+                temp.sender.balance -= (int)(temp.fee/2);
+                temp.amount -= (int)(temp.fee/2);
+            } */
+            temp.sender.balance -= temp.amount;
+            temp.recipient.balance += temp.amount;
+        }
+        transpq.pop();
     }
 }
 
@@ -173,4 +276,5 @@ int main(int argc, char **argv){
     cl(argc, argv);
     regfill();
     transactionfill();
+    place();
 };
