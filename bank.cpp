@@ -262,19 +262,20 @@ void transactionfill(){
             //cout << "Transaction: " << ip << sender << recipient << "  ";
             bool isO = (os=="o");
             uint64_t convertedIP = convertTimestamp(ip);
-            while(transpq.top()->exec < convertTimestamp(timestamp)){
+            while(transpq.size() > 0 && transpq.top()->exec < convertTimestamp(timestamp)){
                 Transaction* temp = transpq.top();
                 if(checkamt(temp)){
                     //cout << temp->sender.id << ", " << temp->recipient.id << ", " << temp->amount << endl;
                     if(temp->o){ //seller covers fee
                         temp->sender.balance -= temp->fee;
+                        temp->sender.balance -= temp->amount;
+                        temp->recipient.balance += temp->amount;
                     }
                     else{
                         temp->sender.balance -= (int)(temp->fee/2);
-                        temp->amount -= (int)(temp->fee/2);
+                        temp->sender.balance -= temp->amount;
+                        temp->recipient.balance += temp->amount - (int)(temp->fee/2);
                     }
-                    temp->sender.balance -= temp->amount;
-                    temp->recipient.balance += temp->amount;
                     transdone.push_back(temp);
                     if(v){
                         cout << "Transaction executed at " << temp->exec << ": $" << temp->amount << " from " << temp->sender.id << " to " << temp->recipient.id << ".\n";
@@ -302,13 +303,14 @@ void place(){
             //cout << temp->sender.id << ", " << temp->recipient.id << ", " << temp->amount << endl;
             if(temp->o){ //seller covers fee
                 temp->sender.balance -= temp->fee;
+                temp->sender.balance -= temp->amount;
+                temp->recipient.balance += temp->amount;
             }
             else{
                 temp->sender.balance -= (int)(temp->fee/2);
-                temp->amount -= (int)(temp->fee/2);
+                temp->sender.balance -= temp->amount;
+                temp->recipient.balance += temp->amount - (int)(temp->fee/2);
             }
-            temp->sender.balance -= temp->amount;
-            temp->recipient.balance += temp->amount;
             transdone.push_back(temp);
             if(v){
                 cout << "Transaction executed at " << temp->exec << ": $" << temp->amount << " from " << temp->sender.id << " to " << temp->recipient.id << ".\n";
@@ -321,7 +323,6 @@ void place(){
     }
 }
 
-/* 
 void querylist(){
     string indicator;
     string in1;
@@ -333,7 +334,7 @@ void querylist(){
         uint64_t ts2 = convertTimestamp(in2);
         for(int i=0; i<transdone.size(); i++){
             if(transdone[i]->exec < ts2 && transdone[i]->exec >= ts1){
-                //cout << i << ""
+                cout << i << "";
             }
         }
     }
@@ -351,7 +352,7 @@ void querylist(){
         uint64_t tsDay = convertTimestamp(in1);
     }
 }
-*/
+
 void removeall(){
     for(auto i: transdone){
         delete i;
@@ -367,6 +368,6 @@ int main(int argc, char **argv){
     regfill();
     transactionfill();
     place();
-    //querylist();
+    querylist();
     removeall();
 };
