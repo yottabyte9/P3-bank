@@ -13,6 +13,8 @@ using namespace std;
 
 uint64_t convertTimestamp(string line);
 uint64_t currentTime;
+void querylist();
+void place();
 
 struct User{
     public:
@@ -174,6 +176,38 @@ bool validTransaction(uint64_t ts, uint64_t ipAddress, string sndrid, string rcp
     return true;
 }
 
+bool notvalidTransaction(uint64_t ts, uint64_t ipAddress, string sndrid, string rcptid, uint64_t e){
+    //cout << e << " checking validity \n";
+    if(ts + 3000000 < e){
+        if(v) cout << "Select a time less than three days in the future.\n";
+        return false;
+    }
+    if(usermap.find(sndrid) == usermap.end()){ //sender does not exist
+        if(v) cout << "Sender " << sndrid << " does not exist.\n";
+        return false;
+    }
+    if(usermap.find(rcptid) == usermap.end()){ //recipient does not exist
+        if(v) cout << "Recipient " << rcptid << " does not exist.\n";
+        return false;
+    }
+    User& sndr = usermap[sndrid];
+    User& rcpt = usermap[rcptid];
+    if(usermap[sndr.id].timestamp > ts || usermap[rcpt.id].timestamp > ts){
+        if(v) cout << "At the time of execution, sender and/or recipient have not registered.\n";
+        return false;
+    }
+    if(sndr.ip.size() == 0){
+        if(v) cout << "Sender " << sndrid << " is not logged in.\n";
+        return false;
+    }
+    auto it = find(sndr.ip.begin(), sndr.ip.end(), ipAddress);
+    if(it == sndr.ip.end()){
+        if(v) cout << "Fraudulent transaction detected, aborting request.\n";
+        return false;
+    }
+    return true;
+}
+
 bool checkamt(Transaction* place){
     int fee = (int)(place->amount *0.01);
     if(fee < 10){
@@ -199,30 +233,26 @@ bool checkamt(Transaction* place){
         if(place->recipient.balance + place->amount < fee) return false;
     }
     place->fee = fee;
-    //cout << place->sender.balance << "\n";
     return true;
 } 
 
 vector<Transaction*> transdone;
 
 void transactionfill(){
-    //cout << "begin transaction fill \n";
     string line;
-    //user ip must be updated
-    while(getline(cin, line)){
-        if(cin.peek() == '#'){
-            while(cin.peek() != '\n'){
-                cin >> line;
-            }
+    // User IP must be updated
+    while(getline(cin, line)) {
+        // Skip comment lines
+        if (!line.empty() && line[0] == '#') {
             continue;
         }
-        cin >> line;
-        if(line == "login"){
-            //cout << "started login\n";
-            string id;
-            string pin;
-            string ip;
-            cin >> id >> pin >> ip;
+
+        stringstream ss(line); // Use a stringstream to process the current line
+        ss >> line;
+
+        if (line == "login") {
+            string id, pin, ip;
+            ss >> id >> pin >> ip;
             if(validLogin(id, stoi(pin))){
                 usermap[id].ip.push_back(convertTimestamp(ip));
                 if(v){
@@ -235,37 +265,51 @@ void transactionfill(){
                 }
             }
         }
-        else if(line == "out"){
-            string id;
-            string ip;
-            cin >> id >> ip;
+        else if (line == "out") {
+            string id, ip;
+            ss >> id >> ip;
             auto userIt = usermap.find(id);
+            uint64_t deleteip = convertTimestamp(ip);
+            vector<uint64_t> ipcopy;
             if (userIt != usermap.end()) {
-                User& user = userIt->second;
-                // Use std::remove_if to remove the specified ip
-                user.ip.erase(std::remove_if(user.ip.begin(), user.ip.end(),
-                    [ip](const uint64_t& userIp) { return userIp == convertTimestamp(ip); }),
-                    user.ip.end());
-
-                cout << "User " << id << " logged out.\n";
+                bool flag = false;
+                for(int i=0; i<(int)(usermap[id].ip.size()); i++){
+                    if(usermap[id].ip[i] != deleteip){
+                        ipcopy.push_back(usermap[id].ip[i]);
+                    }
+                    else if(usermap[id].ip[i] == deleteip){
+                        flag = true;
+                    }
+                }
+                if(flag){
+                    usermap[id].ip = ipcopy;
+                    cout << "User " << id << " logged out.\n";
+                }
+                else{
+                    cout << "Failed to log out " << id << ".\n";
+                }
             }
         }
-        else if(line == "place"){
-            string timestamp;
-            string ip;
-            string sender;
-            string recipient;
-            string amount;
-            string exec;
-            string os;
-            cin >> timestamp >> ip >> sender >> recipient >> amount >> exec >> os;
+        else if (line == "place") {
+            string timestamp, ip, sender, recipient, amount, exec, os;
+            ss >> timestamp >> ip >> sender >> recipient >> amount >> exec >> os;
             //cout << "Transaction: " << ip << sender << recipient << "  ";
             bool isO = (os=="o");
             uint64_t convertedIP = convertTimestamp(ip);
+            if(convertTimestamp(exec) < convertTimestamp(timestamp)){
+                cout << "execution date earlier than place date\n";
+                exit(1);
+            }
+            if(convertTimestamp(timestamp) < currentTime){
+                cout << "place order earlier than current time\n";
+                exit(1);
+            }
+            if(!notvalidTransaction(convertTimestamp(timestamp), convertedIP, sender, recipient, convertTimestamp(exec))){
+                continue;
+            }
             while(transpq.size() > 0 && transpq.top()->exec < convertTimestamp(timestamp)){
                 Transaction* temp = transpq.top();
                 if(checkamt(temp)){
-                    //cout << temp->sender.id << ", " << temp->recipient.id << ", " << temp->amount << endl;
                     if(temp->o){ //seller covers fee
                         temp->sender.balance -= temp->fee;
                         temp->sender.balance -= temp->amount;
@@ -287,20 +331,20 @@ void transactionfill(){
                 Transaction *temp = new Transaction(convertTimestamp(timestamp), convertedIP, sender, recipient, stoi(amount), convertTimestamp(exec), isO);
                 transpq.push(temp);
             }
-            //cout << "Transaction done \n";
+            currentTime = convertTimestamp(timestamp);
         }
         else if(line == "$$$"){
+            place();
+            querylist();
             break;
         }
     }
 }
 
 void place(){
-    //cout << transpq.size();
     while(!transpq.empty()){
         Transaction* temp = transpq.top();
         if(checkamt(temp)){
-            //cout << temp->sender.id << ", " << temp->recipient.id << ", " << temp->amount << endl;
             if(temp->o){ //seller covers fee
                 temp->sender.balance -= temp->fee;
                 temp->sender.balance -= temp->amount;
@@ -323,33 +367,142 @@ void place(){
     }
 }
 
+string formatTimeDifference(uint64_t startTimestamp, uint64_t endTimestamp) {
+    uint64_t seconds = (endTimestamp - startTimestamp);
+    
+    uint64_t months = seconds / 100000000 ;
+    seconds %= 100000000;
+
+    uint64_t days = seconds / 1000000;
+    seconds %= 1000000;
+
+    uint64_t hours = seconds / 10000;
+    seconds %= 10000;
+
+    uint64_t minutes = seconds / 100;
+    seconds %= 100;
+
+    std::string result;
+    if (months > 0) {
+        result += to_string(months) + " month" + (months > 1 ? "s" : "") + " ";
+    }
+    if (days > 0) {
+        result += to_string(days) + " day" + (days > 1 ? "s" : "") + " ";
+    }
+    if (hours > 0) {
+        result += to_string(hours) + " hour" + (hours > 1 ? "s" : "") + " ";
+    }
+    if (minutes > 0) {
+        result += to_string(minutes) + " minute" + (minutes > 1 ? "s" : "") + " ";
+    }
+    if (seconds > 0) {
+        result += to_string(seconds) + " second" + (seconds > 1 ? "s" : "");
+    }
+    //return to_string((endTimestamp - startTimestamp-1));
+    return result;
+}
+
 void querylist(){
     string indicator;
     string in1;
     string in2;
-    cin >> indicator;
-    if(indicator == "l"){
-        cin >> in1 >> in2;
-        uint64_t ts1 = convertTimestamp(in1);
-        uint64_t ts2 = convertTimestamp(in2);
-        for(int i=0; i<transdone.size(); i++){
-            if(transdone[i]->exec < ts2 && transdone[i]->exec >= ts1){
-                cout << i << "";
+    while(getline(cin, indicator)){
+        stringstream ss(indicator);
+        ss >> indicator;
+        if(indicator == "l"){
+            ss >> in1 >> in2;
+            uint64_t ts1 = convertTimestamp(in1);
+            uint64_t ts2 = convertTimestamp(in2);
+            int counter = 0;
+            for(int i=0; i<(int)(transdone.size()); i++){
+                if(transdone[i]->exec < ts2 && transdone[i]->exec >= ts1){
+                    cout << i << ": " << transdone[i]->sender.id << " sent " << transdone[i]->amount << " dollars to " << transdone[i]->recipient.id << " at " << transdone[i]->exec << ".\n";
+                    counter ++;
+                }
+            }
+            cout << "There were " << counter << " transactions that were placed between time " << ts1 << " to " << ts2 << ".\n";
+        }
+        else if(indicator == "r"){
+            ss >> in1 >> in2;
+            uint64_t ts1 = convertTimestamp(in1);
+            uint64_t ts2 = convertTimestamp(in2);
+            int revenue = 0;
+            for(int i=0; i<(int)(transdone.size()); i++){
+                if(transdone[i]->exec < ts2 && transdone[i]->exec >= ts1){
+                    revenue += transdone[i]->fee;
+                }
+            }
+            
+            cout << "281Bank has collected " << revenue << " dollars in fees over " << formatTimeDifference(ts1, ts2) << ".\n";
+        }
+        else if(indicator == "h"){
+            ss >> in1;
+            string id = in1;
+            if(usermap.find(id) == usermap.end()){
+                cout << "User " << id << " does not exist.\n";
+            }
+            else{
+                int counter = 0;
+                int incounter = 0;
+                int outcounter = 0;
+                vector<string> transout;
+                vector<string> transin;
+                for(int i=(int)(transdone.size())-1; i>=0; i--){
+                    if(transdone[i]->sender.id.compare(id) == 0){
+                        if(outcounter < 10){
+                            string p = transdone[i]->sender.id+" sent "+to_string(transdone[i]->amount)+" dollars to "+transdone[i]->recipient.id+" at "+to_string(transdone[i]->exec)+".";
+                            transout.push_back(p);
+                        }
+                        outcounter ++;
+                        counter++;
+                    }
+                    else if(transdone[i]->recipient.id.compare(id) == 0){
+                        if(incounter < 10){
+                            string p = transdone[i]->sender.id+" sent "+to_string(transdone[i]->amount)+" dollars to "+transdone[i]->recipient.id+" at "+to_string(transdone[i]->exec)+".";
+                            transin.push_back(p);
+                        }
+                        incounter++;
+                        counter++;
+                    }
+                }
+                cout << "Customer " << id << " account summary:\n";
+                cout << "Balance: $" << usermap[id].balance << "\n";
+                cout << "Total # of transactions: " << counter << "\n";
+                cout << "Incoming " << incounter << ":\n";
+                for(int i=(int)(transin.size()-1); i>=0; i--){
+                    cout << (int)(transin.size()+1) - i << ": " << transin[i] << "\n";
+                }
+                cout << "Outgoing " << outcounter << ":\n";
+                for(int i=(int)(transout.size()-1); i>=0; i--){
+                    cout << (int)(transin.size()+1)-i << ": " << transout[i] << "\n";
+                }
             }
         }
-    }
-    else if(indicator == "r"){
-        cin >> in1 >> in2;
-        uint64_t ts1 = convertTimestamp(in1);
-        uint64_t ts2 = convertTimestamp(in2);
-    }
-    else if(indicator == "h"){
-        cin >> in1;
-        string id = in1;
-    }
-    else if(indicator == "s"){
-        cin >> in1;
-        uint64_t tsDay = convertTimestamp(in1);
+        else if(indicator == "s"){
+            ss >> in1;
+            uint64_t tsDay = convertTimestamp(in1);
+            tsDay = (tsDay/1000000 )*1000000 ;
+            uint64_t tsEnd = tsDay + 1000000;
+            cout << "Summary of [" << tsDay << ", " << tsEnd << "):\n";
+            int counter = 0;
+            int revenue = 0;
+            for(int i=0; i<(int)(transdone.size()); i++){
+                if(transdone[i]->exec < tsEnd && transdone[i]->exec > tsDay){
+                    cout << i << ": " << transdone[i]->sender.id << " sent " << transdone[i]->amount << " dollars to " << transdone[i]->recipient.id << " at " << transdone[i]->exec << ".\n";
+                    counter++;
+                    revenue += transdone[i]->fee;
+                }
+                else if(transdone[i]->exec > tsEnd){
+                    break;
+                }
+            }
+            if(counter == 1){
+                cout << "There was a total of " << counter << " transaction, 281Bank has collected " << revenue << " dollars in fees.\n";
+            }
+            else{
+                cout << "There were a total of " << counter << " transactions, 281Bank has collected " << revenue << " dollars in fees.\n";
+            }
+        }
     }
 }
 
@@ -367,7 +520,7 @@ int main(int argc, char **argv){
     cl(argc, argv);
     regfill();
     transactionfill();
-    place();
-    querylist();
+    //place();
+    //querylist();
     removeall();
 };
