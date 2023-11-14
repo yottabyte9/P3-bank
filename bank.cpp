@@ -230,7 +230,7 @@ bool checkamt(Transaction* place){
     }
     else if(!place->o){
         if(place->sender.balance < place->amount) return false;
-        if(place->recipient.balance + place->amount < fee) return false;
+        if(place->recipient.balance < fee) return false;
     }
     place->fee = fee;
     return true;
@@ -304,34 +304,33 @@ void transactionfill(){
                 cout << "place order earlier than current time\n";
                 exit(1);
             }
-            if(!notvalidTransaction(convertTimestamp(timestamp), convertedIP, sender, recipient, convertTimestamp(exec))){
-                continue;
-            }
-            while(transpq.size() > 0 && transpq.top()->exec < convertTimestamp(timestamp)){
-                Transaction* temp = transpq.top();
-                if(checkamt(temp)){
-                    if(temp->o){ //seller covers fee
-                        temp->sender.balance -= temp->fee;
-                        temp->sender.balance -= temp->amount;
-                        temp->recipient.balance += temp->amount;
+            if(notvalidTransaction(convertTimestamp(timestamp), convertedIP, sender, recipient, convertTimestamp(exec))){
+                while(transpq.size() > 0 && transpq.top()->exec < convertTimestamp(timestamp)){
+                    Transaction* temp = transpq.top();
+                    if(checkamt(temp)){
+                        if(temp->o){ //seller covers fee
+                            temp->sender.balance -= temp->fee;
+                            temp->sender.balance -= temp->amount;
+                            temp->recipient.balance += temp->amount;
+                        }
+                        else{
+                            temp->sender.balance -= (int)(temp->fee/2);
+                            temp->sender.balance -= temp->amount;
+                            temp->recipient.balance += temp->amount - (int)(temp->fee/2);
+                        }
+                        transdone.push_back(temp);
+                        if(v){
+                            cout << "Transaction executed at " << temp->exec << ": $" << temp->amount << " from " << temp->sender.id << " to " << temp->recipient.id << ".\n";
+                        }
                     }
-                    else{
-                        temp->sender.balance -= (int)(temp->fee/2);
-                        temp->sender.balance -= temp->amount;
-                        temp->recipient.balance += temp->amount - (int)(temp->fee/2);
-                    }
-                    transdone.push_back(temp);
-                    if(v){
-                        cout << "Transaction executed at " << temp->exec << ": $" << temp->amount << " from " << temp->sender.id << " to " << temp->recipient.id << ".\n";
-                    }
+                    transpq.pop();
                 }
-                transpq.pop();
+                if(validTransaction(convertTimestamp(timestamp), convertedIP, sender, recipient, amount, convertTimestamp(exec))){
+                    Transaction *temp = new Transaction(convertTimestamp(timestamp), convertedIP, sender, recipient, stoi(amount), convertTimestamp(exec), isO);
+                    transpq.push(temp);
+                }
+                currentTime = convertTimestamp(timestamp);
             }
-            if(validTransaction(convertTimestamp(timestamp), convertedIP, sender, recipient, amount, convertTimestamp(exec))){
-                Transaction *temp = new Transaction(convertTimestamp(timestamp), convertedIP, sender, recipient, stoi(amount), convertTimestamp(exec), isO);
-                transpq.push(temp);
-            }
-            currentTime = convertTimestamp(timestamp);
         }
         else if(line == "$$$"){
             place();
@@ -420,7 +419,13 @@ void querylist(){
                     counter ++;
                 }
             }
-            cout << "There were " << counter << " transactions that were placed between time " << ts1 << " to " << ts2 << ".\n";
+            if(counter == 1){
+                cout << "There was " << counter << " transaction that was placed between time " << ts1 << " to " << ts2 << ".\n";
+            }
+            else{
+                cout << "There were " << counter << " transactions that were placed between time " << ts1 << " to " << ts2 << ".\n";
+
+            }
         }
         else if(indicator == "r"){
             ss >> in1 >> in2;
@@ -450,7 +455,13 @@ void querylist(){
                 for(int i=(int)(transdone.size())-1; i>=0; i--){
                     if(transdone[i]->sender.id.compare(id) == 0){
                         if(outcounter < 10){
-                            string p = transdone[i]->sender.id+" sent "+to_string(transdone[i]->amount)+" dollars to "+transdone[i]->recipient.id+" at "+to_string(transdone[i]->exec)+".";
+                            string p;
+                            if(transdone[i]->amount == 1){
+                                p = transdone[i]->sender.id+" sent "+to_string(transdone[i]->amount)+" dollar to "+transdone[i]->recipient.id+" at "+to_string(transdone[i]->exec)+".";
+                            }
+                            else{
+                                p = transdone[i]->sender.id+" sent "+to_string(transdone[i]->amount)+" dollars to "+transdone[i]->recipient.id+" at "+to_string(transdone[i]->exec)+".";
+                            }
                             transout.push_back(p);
                         }
                         outcounter ++;
