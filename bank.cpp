@@ -50,12 +50,14 @@ struct Transaction{
         uint64_t exec;
         bool o; //true -> o, false -> s
         int fee;
+        bool done = false;
+        int id;
 
-        Transaction(uint64_t ts, uint64_t ipAddress, User& sndr, User& rcpt, int amnt, uint64_t e, bool isO)
-        : timestamp(ts), ip(ipAddress), sender(sndr), recipient(rcpt), amount(amnt), exec(e), o(isO), fee() {
+        Transaction(uint64_t ts, uint64_t ipAddress, User& sndr, User& rcpt, int amnt, uint64_t e, bool isO, int id)
+        : timestamp(ts), ip(ipAddress), sender(sndr), recipient(rcpt), amount(amnt), exec(e), o(isO), fee(), done(), id(id){
         }
-        Transaction(uint64_t ts, uint64_t ipAddress, string sndrid, string rcptid, int amnt, uint64_t e, bool isO)
-        : timestamp(ts), ip(ipAddress), sender(usermap[sndrid]), recipient(usermap[rcptid]), amount(amnt), exec(e), o(isO), fee() {
+        Transaction(uint64_t ts, uint64_t ipAddress, string sndrid, string rcptid, int amnt, uint64_t e, bool isO, int id)
+        : timestamp(ts), ip(ipAddress), sender(usermap[sndrid]), recipient(usermap[rcptid]), amount(amnt), exec(e), o(isO), fee(), done(), id(id) {
         }
 };
 struct Comparator{
@@ -224,18 +226,18 @@ bool checkamt(Transaction* place){
     if(place->o){ //sender cover
         if(place->sender.balance < place->amount + fee){
             if(v){
-                cout << "Insufficient funds to process transaction " << counterid << ".\n"; //is this IP or ID?
+                cout << "Insufficient funds to process transaction " << place->id << ".\n"; //is this IP or ID?
             }
             return false;
         } 
     }
     else if(!place->o){//split cover
         if(place->sender.balance < place->amount + fee - fee/2){
-            if(v) cout << "Insufficient funds to process transaction " << counterid << ".\n";
+            if(v) cout << "Insufficient funds to process transaction " << place->id << ".\n";
             return false;
         }
         if(place->recipient.balance < fee/2){
-            if(v) cout << "Insufficient funds to process transaction " << counterid << ".\n";
+            if(v) cout << "Insufficient funds to process transaction " << place->id << ".\n";
             return false;
         }
     }
@@ -320,10 +322,8 @@ void transactionfill(){
             }
             if(notvalidTransaction(convertTimestamp(timestamp), convertedIP, sender, recipient, convertTimestamp(exec))){
                 while(transpq.size() > 0 && transpq.top()->exec <= convertTimestamp(timestamp)){
-                    
                     Transaction* temp = transpq.top();
                     if(checkamt(temp)){
-                        
                         if(temp->o){ //seller covers fee
                             temp->sender.balance -= temp->fee;
                             temp->sender.balance -= temp->amount;
@@ -334,16 +334,18 @@ void transactionfill(){
                             temp->sender.balance -= temp->amount;
                             temp->recipient.balance += temp->amount - temp->fee/2;
                         }
-                        transdone.push_back(temp);
+                        //transdone.push_back(temp);
                         if(v){
                             cout << "Transaction executed at " << temp->exec << ": $" << temp->amount << " from " << temp->sender.id << " to " << temp->recipient.id << ".\n";
                         }
+                        temp->done = true;
                     }
-                    counterid++;
+                    transdone.push_back(temp);
                     transpq.pop();
                 }
                 if(validTransaction(convertTimestamp(timestamp), convertedIP, sender, recipient, amount, convertTimestamp(exec))){
-                    Transaction *temp = new Transaction(convertTimestamp(timestamp), convertedIP, sender, recipient, stoi(amount), convertTimestamp(exec), isO);
+                    Transaction *temp = new Transaction(convertTimestamp(timestamp), convertedIP, sender, recipient, stoi(amount), convertTimestamp(exec), isO, counterid);
+                    counterid++;
                     transpq.push(temp);
                 }
                 currentTime = convertTimestamp(timestamp);
@@ -361,6 +363,7 @@ void transactionfill(){
 void place(){
     while(!transpq.empty()){
         Transaction* temp = transpq.top();
+        transdone.push_back(temp);
         if(checkamt(temp)){
             if(temp->o){ //seller covers fee
                 temp->sender.balance -= temp->fee;
@@ -372,14 +375,15 @@ void place(){
                 temp->sender.balance -= (temp->amount + temp->fee);
                 temp->recipient.balance += temp->amount - (int)(temp->fee/2);
             }
-            transdone.push_back(temp);
+            //transdone.push_back(temp);
+            temp->done = true;
             if(v){
                 cout << "Transaction executed at " << temp->exec << ": $" << temp->amount << " from " << temp->sender.id << " to " << temp->recipient.id << ".\n";
             }
         }
-        else{
+        /* else{
             delete temp;
-        }
+        } */
         transpq.pop();
     }
 }
@@ -438,12 +442,12 @@ void querylist(){
             uint64_t ts2 = convertTimestamp(in2);
             int counter = 0;
             for(int i=0; i<(int)(transdone.size()); i++){
-                if(transdone[i]->exec < ts2 && transdone[i]->exec >= ts1){
+                if(transdone[i]->exec < ts2 && transdone[i]->exec >= ts1 && transdone[i]->done){
                     if(transdone[i]->amount == 1){
-                        cout << counter << ": " << transdone[i]->sender.id << " sent " << transdone[i]->amount << " dollar to " << transdone[i]->recipient.id << " at " << transdone[i]->exec << ".\n";
+                        cout << i << ": " << transdone[i]->sender.id << " sent " << transdone[i]->amount << " dollar to " << transdone[i]->recipient.id << " at " << transdone[i]->exec << ".\n";
                     }
                     else{
-                        cout << counter << ": " << transdone[i]->sender.id << " sent " << transdone[i]->amount << " dollars to " << transdone[i]->recipient.id << " at " << transdone[i]->exec << ".\n";
+                        cout << i << ": " << transdone[i]->sender.id << " sent " << transdone[i]->amount << " dollars to " << transdone[i]->recipient.id << " at " << transdone[i]->exec << ".\n";
                     }
                     counter++;
                 }
@@ -462,7 +466,7 @@ void querylist(){
             uint64_t ts2 = convertTimestamp(in2);
             int revenue = 0;
             for(int i=0; i<(int)(transdone.size()); i++){
-                if(transdone[i]->exec < ts2 && transdone[i]->exec >= ts1){
+                if(transdone[i]->exec < ts2 && transdone[i]->exec >= ts1 && transdone[i]->done){
                     revenue += transdone[i]->fee;
                 }
             }
@@ -482,7 +486,8 @@ void querylist(){
                 vector<string> transout;
                 vector<string> transin;
                 for(int i=(int)(transdone.size())-1; i>=0; i--){
-                    if(transdone[i]->sender.id.compare(id) == 0){
+                    bool tempflag = false;
+                    if(transdone[i]->sender.id.compare(id) == 0 && transdone[i]->done){
                         if(outcounter < 10){
                             string p;
                             if(transdone[i]->amount == 1){
@@ -493,16 +498,19 @@ void querylist(){
                             }
                             transout.push_back(p);
                         }
-                        outcounter ++;
-                        counter++;
+                        outcounter++;
+                        tempflag=true;
                     }
-                    else if(transdone[i]->recipient.id.compare(id) == 0){
+                    if(transdone[i]->recipient.id.compare(id) == 0 && transdone[i]->done){
                         if(incounter < 10){
                             string p = transdone[i]->sender.id+" sent "+to_string(transdone[i]->amount)+" dollars to "+transdone[i]->recipient.id+" at "+to_string(transdone[i]->exec)+".";
                             transin.push_back(p);
                         }
                         incounter++;
-                        counter++;
+                        tempflag=true;
+                    }
+                    if(tempflag){
+                        counter ++;
                     }
                 }
                 cout << "Customer " << id << " account summary:\n";
@@ -527,12 +535,12 @@ void querylist(){
             int counter = 0;
             int revenue = 0;
             for(int i=0; i<(int)(transdone.size()); i++){
-                if(transdone[i]->exec < tsEnd && transdone[i]->exec >= tsDay){
+                if(transdone[i]->exec < tsEnd && transdone[i]->exec >= tsDay && transdone[i]->done){
                     if(transdone[i]->amount == 1){
-                        cout << i << ": " << transdone[i]->sender.id << " sent " << transdone[i]->amount << " dollar to " << transdone[i]->recipient.id << " at " << transdone[i]->exec << ".\n";
+                        cout << counter << ": " << transdone[i]->sender.id << " sent " << transdone[i]->amount << " dollar to " << transdone[i]->recipient.id << " at " << transdone[i]->exec << ".\n";
                     }
                     else{
-                        cout << i << ": " << transdone[i]->sender.id << " sent " << transdone[i]->amount << " dollars to " << transdone[i]->recipient.id << " at " << transdone[i]->exec << ".\n";
+                        cout << counter << ": " << transdone[i]->sender.id << " sent " << transdone[i]->amount << " dollars to " << transdone[i]->recipient.id << " at " << transdone[i]->exec << ".\n";
                     }
                     counter++;
                     revenue += transdone[i]->fee;
@@ -552,8 +560,10 @@ void querylist(){
 }
 
 void removeall(){
-    for(auto i: transdone){
-        delete i;
+    for(int i=0; i<(int)(transdone.size()); i++){
+        if(transdone[i] != nullptr){
+            delete transdone[i];
+        }
     }
     if(transpq.size() != 0){
         cout << "FAILED TO DELETE TRANSACTION PQ OBJECTS";
