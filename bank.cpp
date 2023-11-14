@@ -13,6 +13,7 @@ using namespace std;
 
 uint64_t convertTimestamp(string line);
 uint64_t currentTime;
+int counterid;
 void querylist();
 void place();
 
@@ -209,28 +210,34 @@ bool notvalidTransaction(uint64_t ts, uint64_t ipAddress, string sndrid, string 
 }
 
 bool checkamt(Transaction* place){
-    int fee = (int)(place->amount *0.01);
+    int fee = (int)(place->amount/100);
     if(fee < 10){
         fee = 10;
     }
     if(fee > 450){
         fee = 450;
     }
-    if(place->sender.timestamp > place->timestamp + 50000000000){
+    if(place->timestamp > place->sender.timestamp + 50000000000){
         fee = (fee*3)/4;
     }
     //place.amount += (int)fee;
     if(place->o){ //sender cover
         if(place->sender.balance < place->amount + fee){
             if(v){
-                cout << "Insufficient funds to process transaction " << place->ip << ".\n"; //is this IP or ID?
+                cout << "Insufficient funds to process transaction " << counterid << ".\n"; //is this IP or ID?
             }
             return false;
         } 
     }
-    else if(!place->o){
-        if(place->sender.balance < place->amount) return false;
-        if(place->recipient.balance < fee) return false;
+    else if(!place->o){//split cover
+        if(place->sender.balance < place->amount + fee - fee/2){
+            cout << "Insufficient funds to process transaction " << counterid << ".\n";
+            return false;
+        }
+        if(place->recipient.balance < fee/2){
+            cout << "Insufficient funds to process transaction " << counterid << ".\n";
+            return false;
+        }
     }
     place->fee = fee;
     return true;
@@ -283,10 +290,14 @@ void transactionfill(){
                 }
                 if(flag){
                     usermap[id].ip = ipcopy;
-                    cout << "User " << id << " logged out.\n";
+                    if(v){
+                        cout << "User " << id << " logged out.\n";
+                    }
                 }
                 else{
-                    cout << "Failed to log out " << id << ".\n";
+                    if(v){
+                        cout << "Failed to log out " << id << ".\n";
+                    }
                 }
             }
         }
@@ -305,7 +316,7 @@ void transactionfill(){
                 exit(1);
             }
             if(notvalidTransaction(convertTimestamp(timestamp), convertedIP, sender, recipient, convertTimestamp(exec))){
-                while(transpq.size() > 0 && transpq.top()->exec < convertTimestamp(timestamp)){
+                while(transpq.size() > 0 && transpq.top()->exec <= convertTimestamp(timestamp)){
                     Transaction* temp = transpq.top();
                     if(checkamt(temp)){
                         if(temp->o){ //seller covers fee
@@ -323,6 +334,7 @@ void transactionfill(){
                             cout << "Transaction executed at " << temp->exec << ": $" << temp->amount << " from " << temp->sender.id << " to " << temp->recipient.id << ".\n";
                         }
                     }
+                    counterid++;
                     transpq.pop();
                 }
                 if(validTransaction(convertTimestamp(timestamp), convertedIP, sender, recipient, amount, convertTimestamp(exec))){
@@ -350,8 +362,8 @@ void place(){
                 temp->recipient.balance += temp->amount;
             }
             else{
-                temp->sender.balance -= (int)(temp->fee/2);
-                temp->sender.balance -= temp->amount;
+                temp->sender.balance += (int)(temp->fee/2);//fix 
+                temp->sender.balance -= (temp->amount + temp->fee);
                 temp->recipient.balance += temp->amount - (int)(temp->fee/2);
             }
             transdone.push_back(temp);
@@ -369,6 +381,9 @@ void place(){
 string formatTimeDifference(uint64_t startTimestamp, uint64_t endTimestamp) {
     uint64_t seconds = (endTimestamp - startTimestamp);
     
+    uint64_t years = seconds / 10000000000;
+    seconds %= 10000000000;
+
     uint64_t months = seconds / 100000000 ;
     seconds %= 100000000;
 
@@ -381,21 +396,24 @@ string formatTimeDifference(uint64_t startTimestamp, uint64_t endTimestamp) {
     uint64_t minutes = seconds / 100;
     seconds %= 100;
 
-    std::string result;
+    string result;
+    if (years > 0) {
+        result += " " + to_string(years) + " year" + (years > 1 ? "s" : "");
+    }
     if (months > 0) {
-        result += to_string(months) + " month" + (months > 1 ? "s" : "") + " ";
+        result += " " + to_string(months) + " month" + (months > 1 ? "s" : "");
     }
     if (days > 0) {
-        result += to_string(days) + " day" + (days > 1 ? "s" : "") + " ";
+        result += " " + to_string(days) + " day" + (days > 1 ? "s" : "");
     }
     if (hours > 0) {
-        result += to_string(hours) + " hour" + (hours > 1 ? "s" : "") + " ";
+        result += " " + to_string(hours) + " hour" + (hours > 1 ? "s" : "");
     }
     if (minutes > 0) {
-        result += to_string(minutes) + " minute" + (minutes > 1 ? "s" : "") + " ";
+        result += " " + to_string(minutes) + " minute" + (minutes > 1 ? "s" : "");
     }
     if (seconds > 0) {
-        result += to_string(seconds) + " second" + (seconds > 1 ? "s" : "");
+        result += " " + to_string(seconds) + " second" + (seconds > 1 ? "s" : "");
     }
     //return to_string((endTimestamp - startTimestamp-1));
     return result;
@@ -415,8 +433,13 @@ void querylist(){
             int counter = 0;
             for(int i=0; i<(int)(transdone.size()); i++){
                 if(transdone[i]->exec < ts2 && transdone[i]->exec >= ts1){
-                    cout << i << ": " << transdone[i]->sender.id << " sent " << transdone[i]->amount << " dollars to " << transdone[i]->recipient.id << " at " << transdone[i]->exec << ".\n";
-                    counter ++;
+                    if(transdone[i]->amount == 1){
+                        cout << i << ": " << transdone[i]->sender.id << " sent " << transdone[i]->amount << " dollar to " << transdone[i]->recipient.id << " at " << transdone[i]->exec << ".\n";
+                    }
+                    else{
+                        cout << i << ": " << transdone[i]->sender.id << " sent " << transdone[i]->amount << " dollars to " << transdone[i]->recipient.id << " at " << transdone[i]->exec << ".\n";
+                    }
+                    counter++;
                 }
             }
             if(counter == 1){
@@ -438,7 +461,7 @@ void querylist(){
                 }
             }
             
-            cout << "281Bank has collected " << revenue << " dollars in fees over " << formatTimeDifference(ts1, ts2) << ".\n";
+            cout << "281Bank has collected " << revenue << " dollars in fees over" << formatTimeDifference(ts1, ts2) << ".\n";
         }
         else if(indicator == "h"){
             ss >> in1;
