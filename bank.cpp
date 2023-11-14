@@ -8,6 +8,8 @@
 #include <fstream>
 #include <sstream>
 #include <map>
+#include <set>
+#include <unordered_set>
 
 using namespace std;
 
@@ -23,7 +25,7 @@ struct User{
         string id;
         int pin;
         int balance;
-        vector<uint64_t> ip;
+        unordered_set<uint64_t> ip;
         
         User() : timestamp(0), id(""), pin(0), balance(0), ip() {
         }
@@ -170,8 +172,7 @@ bool validTransaction(uint64_t ts, uint64_t ipAddress, string sndrid, string rcp
         if(v) cout << "Sender " << sndrid << " is not logged in.\n";
         return false;
     }
-    auto it = find(sndr.ip.begin(), sndr.ip.end(), ipAddress);
-    if(it == sndr.ip.end()){
+    if(sndr.ip.find(ipAddress) == sndr.ip.end()){
         if(v) cout << "Fraudulent transaction detected, aborting request.\n";
         return false;
     }
@@ -203,8 +204,7 @@ bool notvalidTransaction(uint64_t ts, uint64_t ipAddress, string sndrid, string 
         if(v) cout << "Sender " << sndrid << " is not logged in.\n";
         return false;
     }
-    auto it = find(sndr.ip.begin(), sndr.ip.end(), ipAddress);
-    if(it == sndr.ip.end()){
+    if(sndr.ip.find(ipAddress) == sndr.ip.end()){
         if(v) cout << "Fraudulent transaction detected, aborting request.\n";
         return false;
     }
@@ -263,7 +263,7 @@ void transactionfill(){
             string id, pin, ip;
             ss >> id >> pin >> ip;
             if(validLogin(id, stoi(pin))){
-                usermap[id].ip.push_back(convertTimestamp(ip));
+                usermap[id].ip.insert(convertTimestamp(ip));
                 if(v){
                     cout << "User " << id << " logged in.\n";
                 }
@@ -279,22 +279,19 @@ void transactionfill(){
             ss >> id >> ip;
             auto userIt = usermap.find(id);
             uint64_t deleteip = convertTimestamp(ip);
-            vector<uint64_t> ipcopy;
             if( userIt == usermap.end()){
                 cout << "Failed to log out " << id << ".\n"; 
             }
             else if (userIt != usermap.end()) {
                 bool flag = false;
-                for(int i=0; i<(int)(usermap[id].ip.size()); i++){
-                    if(usermap[id].ip[i] != deleteip){
-                        ipcopy.push_back(usermap[id].ip[i]);
-                    }
-                    else if(usermap[id].ip[i] == deleteip){
-                        flag = true;
-                    }
+                if(usermap[id].ip.find(deleteip) != usermap[id].ip.end()){
+                    flag = true;
+                    usermap[id].ip.erase(deleteip);
+                }
+                else if(usermap[id].ip.find(deleteip) == usermap[id].ip.end()){
+                    flag = false;
                 }
                 if(flag){
-                    usermap[id].ip = ipcopy;
                     if(v){
                         cout << "User " << id << " logged out.\n";
                     }
@@ -313,11 +310,11 @@ void transactionfill(){
             bool isO = (os=="o");
             uint64_t convertedIP = convertTimestamp(ip);
             if(convertTimestamp(exec) < convertTimestamp(timestamp)){
-                cout << "execution date earlier than place date\n";
+                cerr << "execution date earlier than place date\n";
                 exit(1);
             }
             if(convertTimestamp(timestamp) < currentTime){
-                cout << "place order earlier than current time\n";
+                cerr << "place order earlier than current time\n";
                 exit(1);
             }
             if(notvalidTransaction(convertTimestamp(timestamp), convertedIP, sender, recipient, convertTimestamp(exec))){
@@ -344,6 +341,7 @@ void transactionfill(){
                     transpq.pop();
                 }
                 if(validTransaction(convertTimestamp(timestamp), convertedIP, sender, recipient, amount, convertTimestamp(exec))){
+                    //cout << counterid << endl;
                     Transaction *temp = new Transaction(convertTimestamp(timestamp), convertedIP, sender, recipient, stoi(amount), convertTimestamp(exec), isO, counterid);
                     counterid++;
                     transpq.push(temp);
@@ -444,10 +442,10 @@ void querylist(){
             for(int i=0; i<(int)(transdone.size()); i++){
                 if(transdone[i]->exec < ts2 && transdone[i]->exec >= ts1 && transdone[i]->done){
                     if(transdone[i]->amount == 1){
-                        cout << i << ": " << transdone[i]->sender.id << " sent " << transdone[i]->amount << " dollar to " << transdone[i]->recipient.id << " at " << transdone[i]->exec << ".\n";
+                        cout << transdone[i]->id << ": " << transdone[i]->sender.id << " sent " << transdone[i]->amount << " dollar to " << transdone[i]->recipient.id << " at " << transdone[i]->exec << ".\n";
                     }
                     else{
-                        cout << i << ": " << transdone[i]->sender.id << " sent " << transdone[i]->amount << " dollars to " << transdone[i]->recipient.id << " at " << transdone[i]->exec << ".\n";
+                        cout << transdone[i]->id << ": " << transdone[i]->sender.id << " sent " << transdone[i]->amount << " dollars to " << transdone[i]->recipient.id << " at " << transdone[i]->exec << ".\n";
                     }
                     counter++;
                 }
@@ -503,7 +501,13 @@ void querylist(){
                     }
                     if(transdone[i]->recipient.id.compare(id) == 0 && transdone[i]->done){
                         if(incounter < 10){
-                            string p = transdone[i]->sender.id+" sent "+to_string(transdone[i]->amount)+" dollars to "+transdone[i]->recipient.id+" at "+to_string(transdone[i]->exec)+".";
+                            string p;
+                            if(transdone[i]->amount == 1){
+                                p = "" + to_string(transdone[i]->id) + ": " + transdone[i]->sender.id+" sent "+to_string(transdone[i]->amount)+" dollar to "+transdone[i]->recipient.id+" at "+to_string(transdone[i]->exec)+".";
+                            }
+                            else{
+                                p = "" + to_string(transdone[i]->id) + ": " + transdone[i]->sender.id+" sent "+to_string(transdone[i]->amount)+" dollars to "+transdone[i]->recipient.id+" at "+to_string(transdone[i]->exec)+".";
+                            }
                             transin.push_back(p);
                         }
                         incounter++;
@@ -518,11 +522,11 @@ void querylist(){
                 cout << "Total # of transactions: " << counter << "\n";
                 cout << "Incoming " << incounter << ":\n";
                 for(int i=(int)(transin.size()-1); i>=0; i--){
-                    cout << (int)(transin.size()+1) - i << ": " << transin[i] << "\n";
+                    cout << transin[i] << "\n";
                 }
                 cout << "Outgoing " << outcounter << ":\n";
                 for(int i=(int)(transout.size()-1); i>=0; i--){
-                    cout << (int)(transin.size()+1)-i << ": " << transout[i] << "\n";
+                    cout << transout[i] << "\n";
                 }
             }
         }
@@ -537,10 +541,10 @@ void querylist(){
             for(int i=0; i<(int)(transdone.size()); i++){
                 if(transdone[i]->exec < tsEnd && transdone[i]->exec >= tsDay && transdone[i]->done){
                     if(transdone[i]->amount == 1){
-                        cout << counter << ": " << transdone[i]->sender.id << " sent " << transdone[i]->amount << " dollar to " << transdone[i]->recipient.id << " at " << transdone[i]->exec << ".\n";
+                        cout << transdone[i]->id << ": " << transdone[i]->sender.id << " sent " << transdone[i]->amount << " dollar to " << transdone[i]->recipient.id << " at " << transdone[i]->exec << ".\n";
                     }
                     else{
-                        cout << counter << ": " << transdone[i]->sender.id << " sent " << transdone[i]->amount << " dollars to " << transdone[i]->recipient.id << " at " << transdone[i]->exec << ".\n";
+                        cout << transdone[i]->id << ": " << transdone[i]->sender.id << " sent " << transdone[i]->amount << " dollars to " << transdone[i]->recipient.id << " at " << transdone[i]->exec << ".\n";
                     }
                     counter++;
                     revenue += transdone[i]->fee;
