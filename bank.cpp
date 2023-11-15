@@ -15,7 +15,7 @@ using namespace std;
 
 uint64_t convertTimestamp(string line);
 uint64_t currentTime;
-int counterid;
+int counterid=0;
 void querylist();
 void place();
 
@@ -25,7 +25,7 @@ struct User{
         string id;
         int pin;
         int balance;
-        unordered_set<uint64_t> ip;
+        unordered_set<string> ip;
         
         User() : timestamp(0), id(""), pin(0), balance(0), ip() {
         }
@@ -45,7 +45,7 @@ unordered_map<string, User> usermap;
 struct Transaction{
     public:
         uint64_t timestamp;
-        uint64_t ip;
+        string ip;
         User& sender;
         User& recipient;
         int amount;
@@ -55,17 +55,20 @@ struct Transaction{
         bool done = false;
         int id;
 
-        Transaction(uint64_t ts, uint64_t ipAddress, User& sndr, User& rcpt, int amnt, uint64_t e, bool isO, int id)
+        Transaction(uint64_t ts, string ipAddress, User& sndr, User& rcpt, int amnt, uint64_t e, bool isO, int id)
         : timestamp(ts), ip(ipAddress), sender(sndr), recipient(rcpt), amount(amnt), exec(e), o(isO), fee(), done(), id(id){
         }
-        Transaction(uint64_t ts, uint64_t ipAddress, string sndrid, string rcptid, int amnt, uint64_t e, bool isO, int id)
+        Transaction(uint64_t ts, string ipAddress, string sndrid, string rcptid, int amnt, uint64_t e, bool isO, int id)
         : timestamp(ts), ip(ipAddress), sender(usermap[sndrid]), recipient(usermap[rcptid]), amount(amnt), exec(e), o(isO), fee(), done(), id(id) {
         }
 };
 struct Comparator{
     bool operator()(Transaction* t1, Transaction* t2) const{
         if(t1->exec > t2->exec){
-            return true;
+            return true; //if t2 comes first
+        }
+        if(t1->exec == t2->exec){
+            return t1->id > t2->id; //true if t2 comes first
         }
         return false;
     }
@@ -148,7 +151,7 @@ bool validLogin(string id, int pin){ //make IP into number
     return true;
 }
 
-bool validTransaction(uint64_t ts, uint64_t ipAddress, string sndrid, string rcptid, string amt, uint64_t e){
+bool validTransaction(uint64_t ts, string ipAddress, string sndrid, string rcptid, string amt, uint64_t e){
     //cout << e << " checking validity \n";
     if(ts + 3000000 < e){
         if(v) cout << "Select a time less than three days in the future.\n";
@@ -180,7 +183,7 @@ bool validTransaction(uint64_t ts, uint64_t ipAddress, string sndrid, string rcp
     return true;
 }
 
-bool notvalidTransaction(uint64_t ts, uint64_t ipAddress, string sndrid, string rcptid, uint64_t e){
+bool notvalidTransaction(uint64_t ts, string ipAddress, string sndrid, string rcptid, uint64_t e){
     //cout << e << " checking validity \n";
     if(ts + 3000000 < e){
         if(v) cout << "Select a time less than three days in the future.\n";
@@ -263,7 +266,7 @@ void transactionfill(){
             string id, pin, ip;
             ss >> id >> pin >> ip;
             if(validLogin(id, stoi(pin))){
-                usermap[id].ip.insert(convertTimestamp(ip));
+                usermap[id].ip.insert(ip);
                 if(v){
                     cout << "User " << id << " logged in.\n";
                 }
@@ -278,17 +281,16 @@ void transactionfill(){
             string id, ip;
             ss >> id >> ip;
             auto userIt = usermap.find(id);
-            uint64_t deleteip = convertTimestamp(ip);
             if( userIt == usermap.end()){
                 cout << "Failed to log out " << id << ".\n"; 
             }
             else if (userIt != usermap.end()) {
                 bool flag = false;
-                if(usermap[id].ip.find(deleteip) != usermap[id].ip.end()){
+                if(usermap[id].ip.find(ip) != usermap[id].ip.end()){
                     flag = true;
-                    usermap[id].ip.erase(deleteip);
+                    usermap[id].ip.erase(ip);
                 }
-                else if(usermap[id].ip.find(deleteip) == usermap[id].ip.end()){
+                else if(usermap[id].ip.find(ip) == usermap[id].ip.end()){
                     flag = false;
                 }
                 if(flag){
@@ -308,7 +310,6 @@ void transactionfill(){
             ss >> timestamp >> ip >> sender >> recipient >> amount >> exec >> os;
             //cout << "Transaction: " << ip << sender << recipient << "  ";
             bool isO = (os=="o");
-            uint64_t convertedIP = convertTimestamp(ip);
             if(convertTimestamp(exec) < convertTimestamp(timestamp)){
                 cerr << "execution date earlier than place date\n";
                 exit(1);
@@ -317,7 +318,7 @@ void transactionfill(){
                 cerr << "place order earlier than current time\n";
                 exit(1);
             }
-            if(notvalidTransaction(convertTimestamp(timestamp), convertedIP, sender, recipient, convertTimestamp(exec))){
+            if(notvalidTransaction(convertTimestamp(timestamp), ip, sender, recipient, convertTimestamp(exec))){
                 while(transpq.size() > 0 && transpq.top()->exec <= convertTimestamp(timestamp)){
                     Transaction* temp = transpq.top();
                     if(checkamt(temp)){
@@ -340,9 +341,9 @@ void transactionfill(){
                     transdone.push_back(temp);
                     transpq.pop();
                 }
-                if(validTransaction(convertTimestamp(timestamp), convertedIP, sender, recipient, amount, convertTimestamp(exec))){
+                if(validTransaction(convertTimestamp(timestamp), ip, sender, recipient, amount, convertTimestamp(exec))){
                     //cout << counterid << endl;
-                    Transaction *temp = new Transaction(convertTimestamp(timestamp), convertedIP, sender, recipient, stoi(amount), convertTimestamp(exec), isO, counterid);
+                    Transaction *temp = new Transaction(convertTimestamp(timestamp), ip, sender, recipient, stoi(amount), convertTimestamp(exec), isO, counterid);
                     counterid++;
                     transpq.push(temp);
                 }
@@ -442,10 +443,10 @@ void querylist(){
             for(int i=0; i<(int)(transdone.size()); i++){
                 if(transdone[i]->exec < ts2 && transdone[i]->exec >= ts1 && transdone[i]->done){
                     if(transdone[i]->amount == 1){
-                        cout << transdone[i]->id << ": " << transdone[i]->sender.id << " sent " << transdone[i]->amount << " dollar to " << transdone[i]->recipient.id << " at " << transdone[i]->exec << ".\n";
+                        cout << to_string(transdone[i]->id) << ": " << transdone[i]->sender.id << " sent " << transdone[i]->amount << " dollar to " << transdone[i]->recipient.id << " at " << transdone[i]->exec << ".\n";
                     }
                     else{
-                        cout << transdone[i]->id << ": " << transdone[i]->sender.id << " sent " << transdone[i]->amount << " dollars to " << transdone[i]->recipient.id << " at " << transdone[i]->exec << ".\n";
+                        cout << to_string(transdone[i]->id) << ": " << transdone[i]->sender.id << " sent " << transdone[i]->amount << " dollars to " << transdone[i]->recipient.id << " at " << transdone[i]->exec << ".\n";
                     }
                     counter++;
                 }
@@ -478,26 +479,23 @@ void querylist(){
                 cout << "User " << id << " does not exist.\n";
             }
             else{
-                int counter = 0;
                 int incounter = 0;
                 int outcounter = 0;
                 vector<string> transout;
                 vector<string> transin;
                 for(int i=(int)(transdone.size())-1; i>=0; i--){
-                    bool tempflag = false;
                     if(transdone[i]->sender.id.compare(id) == 0 && transdone[i]->done){
                         if(outcounter < 10){
                             string p;
                             if(transdone[i]->amount == 1){
-                                p = transdone[i]->sender.id+" sent "+to_string(transdone[i]->amount)+" dollar to "+transdone[i]->recipient.id+" at "+to_string(transdone[i]->exec)+".";
+                                p = "" + to_string(transdone[i]->id) + ": " + transdone[i]->sender.id+" sent "+to_string(transdone[i]->amount)+" dollar to "+transdone[i]->recipient.id+" at "+to_string(transdone[i]->exec)+".";
                             }
                             else{
-                                p = transdone[i]->sender.id+" sent "+to_string(transdone[i]->amount)+" dollars to "+transdone[i]->recipient.id+" at "+to_string(transdone[i]->exec)+".";
+                                p = "" + to_string(transdone[i]->id) + ": " + transdone[i]->sender.id+" sent "+to_string(transdone[i]->amount)+" dollars to "+transdone[i]->recipient.id+" at "+to_string(transdone[i]->exec)+".";
                             }
                             transout.push_back(p);
                         }
                         outcounter++;
-                        tempflag=true;
                     }
                     if(transdone[i]->recipient.id.compare(id) == 0 && transdone[i]->done){
                         if(incounter < 10){
@@ -511,15 +509,11 @@ void querylist(){
                             transin.push_back(p);
                         }
                         incounter++;
-                        tempflag=true;
-                    }
-                    if(tempflag){
-                        counter ++;
                     }
                 }
                 cout << "Customer " << id << " account summary:\n";
                 cout << "Balance: $" << usermap[id].balance << "\n";
-                cout << "Total # of transactions: " << counter << "\n";
+                cout << "Total # of transactions: " << incounter + outcounter << "\n";
                 cout << "Incoming " << incounter << ":\n";
                 for(int i=(int)(transin.size()-1); i>=0; i--){
                     cout << transin[i] << "\n";
